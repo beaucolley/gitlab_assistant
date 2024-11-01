@@ -8,9 +8,6 @@ import logging
 
 # Replace these variables with your own information
 GITLAB_URL = 'https://git.web.boeing.com'  # Your GitLab instance URL
-# PRIVATE_TOKEN = 'xVQLzhMTB-4CGx9xgXRi'         # READ
-# PRIVATE_TOKEN = 'mXWLMH_7Zp7gsWGrXgX9'         # WRITE
-PRIVATE_TOKEN = 'GVv54T66skyzWf5Y88st'         # ADMIN
 PROJECT_ID = '142836'               # The ID of the project you want to access
 GROUP_ID = '155309'
 
