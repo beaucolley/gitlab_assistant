@@ -1,0 +1,8 @@
+bin/
+config.ini
+gitlab_assistant.log
+lib/
+lib64
+open_issues.csv
+pyvenv.cfg
+

@@ -5,11 +5,17 @@ import gitlab
 import csv
 import json
 import logging
+import os
+import configparser
 
-# Replace these variables with your own information
-GITLAB_URL = 'https://git.web.boeing.com'  # Your GitLab instance URL
-PROJECT_ID = '142836'               # The ID of the project you want to access
-GROUP_ID = '155309'
+# Load configuration from config file
+config = configparser.ConfigParser()
+config.read(os.path.join(os.path.dirname(__file__), 'config.ini'))
+
+GITLAB_URL = config['gitlab']['url']
+PROJECT_ID = config['gitlab']['project_id']
+GROUP_ID = config['gitlab']['group_id']
+PRIVATE_TOKEN = config['gitlab']['access_token']
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -37,24 +43,23 @@ def pull_issues(output):
 
     # Prepare data for CSV
     with open(output, mode='w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['ID', 'iid', 'Title', 'Epic', 'Milestone', 'Iteration', 'Author', 'Created At', 'Description', 'State', 'Weight']
+        fieldnames = ['id', 'iid', 'title', 'epic', 'milestone', 'iteration', 'author', 'created_at', 'description', 'state', 'weight']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
         writer.writeheader()
         for issue in open_issues:
             logger.info(f"Processing issue {issue.id} - {issue.title}")
             writer.writerow({
-                'ID': issue.id,
+                'id': issue.id,
                 'iid': issue.iid,
-                'Title': issue.title,
-                'Epic': issue.epic["title"],
-                'Milestone': issue.milestone["title"],
-                'Iteration': issue.iteration,
-                'Author': issue.author['name'],
-                'Created At': issue.created_at,
-                'Description': issue.description,
-                'State': issue.state,
-                'Weight': issue.weight
+                'title': issue.title,
+                'epic': issue.epic["title"] if issue.epic else '',
+                'milestone': issue.milestone["title"] if issue.milestone else '',
+                'iteration': issue.iteration if 'iteration' in issue.attributes else '',
+                'author': issue.author['name'],
+                'created_at': issue.created_at,
+                'description': issue.description,
+                'state': issue.state,
+                'weight': issue.weight if 'weight' in issue.attributes else ''
             })
 
     click.echo(f'Open issues exported to {output}')
@@ -65,7 +70,7 @@ def get_epic(epic_title):
     for epic in epics:
         if epic.title == epic_title:
             return gl.groups.get(GROUP_ID).epics.get(epic.iid)
-    logger.error(f'Epic {epic_title} not found.')
+    logger.error(f'epic {epic_title} not found.')
     return None
 
 
@@ -74,8 +79,51 @@ def get_milestone(milestone_title):
     for milestone in milestones:
         if milestone.title == milestone_title:
             return gl.groups.get(GROUP_ID).milestones.get(milestone.iid)
-    logger.error(f'Milestone {milestone_title} not found.')
+    logger.error(f'milestone {milestone_title} not found.')
     return None
+
+def update_issue(issue, row):
+    logger.info(f"Updating issue ID {issue.id}")
+    # logger.info(f"Issue attributes: {issue.attributes}")
+
+    # print(row)
+    # print(issue.attributes)
+    issue_updated = False
+    
+    for key, value in row.items():
+        if key in issue.attributes and str(getattr(issue, key, '')).strip() != str(value).strip() and value != "":
+            if key == 'author':
+                continue
+            logger.info(f"Updating {key} from {getattr(issue, key, '')} to {value}")
+            setattr(issue, key, value)
+            issue_updated = True
+
+    if issue_updated:
+        issue.save()
+
+
+def create_issue(row):
+    logger.info(f"Creating new issue {row['title']}")
+    new_issue_data = {
+        'title': row['title'],
+        'description': row['description'],
+        'state': row['state'],
+        'weight': row['weight']
+    }
+
+    if row['epic']:
+        epic = get_epic(row['epic'])
+        if epic is not None:
+            new_issue_data['epic_id'] = epic.id
+
+    if row['milestone']:
+        milestone = get_milestone(row['milestone'])
+        if milestone is not None:
+            new_issue_data['milestone_id'] = milestone.id
+
+    project = gl.projects.get(PROJECT_ID)
+    project.issues.create(new_issue_data)
+
 
 @cli.command()
 @click.option('--input', required=True, help='Input CSV file to update issues.')
@@ -91,28 +139,18 @@ def update_issues(input):
 
     # Update issues based on the CSV data
     for row in issues_to_update:
-        logger.info(f"Processing row {row['ID']} - {row['Title']}")
-        issue_id = int(row['iid'])  # Convert ID to integer
-        try:
-            # Find the issue by ID
-            issue = project.issues.get(issue_id)
-            issue.title = row['Title']
-            issue.description = row['Description']
-            issue.state = row['State']  # Note: Changing state may require additional permissions
-            issue.weight = row['Weight']
+        issue_id = row['iid']  # Convert ID to integer
 
-            if row['Epic'] != issue.epic["title"]:
-                epic = get_epic(row['Epic'])
-                if epic is not None:
-                    logger.info(f'Updating Epic for issue ID {issue_id}')
-                    ei = epic.issues.create({'issue_id': issue.id})
-                    ei.save()
+        if issue_id == "":
+            create_issue(row)
+        else:
+            try:
+                issue = project.issues.get(int(issue_id))
+                update_issue(issue, row)
+            except gitlab.exceptions.GitlabGetError:
+                click.echo(f'Issue ID {issue_id} not found.')
+        
 
-            # issue.milestone = get_milestone(row['Milestone'])
-            issue.save()  # Save the changes
-            click.echo(f'Updated issue ID {issue_id}')
-        except gitlab.exceptions.GitlabGetError:
-            click.echo(f'Issue ID {issue_id} not found.')
 
 if __name__ == '__main__':
     cli()
