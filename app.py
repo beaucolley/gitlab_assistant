@@ -67,6 +67,7 @@ def pull_issues(output):
 
 def get_epic(epic_title):
     epics = gl.groups.get(GROUP_ID).epics.list()
+    logger.debug(f'epics: {epics}')
     for epic in epics:
         if epic.title == epic_title:
             return gl.groups.get(GROUP_ID).epics.get(epic.iid)
@@ -83,17 +84,33 @@ def get_milestone(milestone_title):
     return None
 
 def update_issue(issue, row):
-    logger.info(f"Updating issue ID {issue.id}")
-    # logger.info(f"Issue attributes: {issue.attributes}")
-
-    # print(row)
-    # print(issue.attributes)
+    logger.info(f"Updating issue ID {issue.iid} - {issue.title}")
     issue_updated = False
     
     for key, value in row.items():
         if key in issue.attributes and str(getattr(issue, key, '')).strip() != str(value).strip() and value != "":
             if key == 'author':
                 continue
+
+            if key == 'epic':
+                # Remove epic from issue if csv value is empty or different
+                if  value == "" or (issue.epic is not None and value != issue.epic["title"]):
+                    logger.info(f"Removing epic {issue.epic['title']}")
+                    issue.epic = None
+                    issue_updated = True
+                    continue
+                
+                # Check if epic is already set
+                if issue.epic is not None and value == issue.epic["title"]:
+                    continue
+
+                # Set epic
+                epic = get_epic(value)
+                if epic is not None:
+                    epic.issues.create({'issue_id': issue.id})
+                    logger.info(f"Added issue to epic {value}")
+                continue
+                
             logger.info(f"Updating {key} from {getattr(issue, key, '')} to {value}")
             setattr(issue, key, value)
             issue_updated = True
