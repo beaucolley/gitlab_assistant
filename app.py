@@ -18,7 +18,7 @@ GROUP_ID = config['gitlab']['group_id']
 PRIVATE_TOKEN = config['gitlab']['access_token']
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[logging.FileHandler("gitlab_assistant.log"), logging.StreamHandler()])
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def pull_issues(output):
 
 
 def get_epic(epic_title):
-    epics = gl.groups.get(GROUP_ID).epics.list()
+    epics = gl.groups.get(GROUP_ID).epics.list(get_all=True, state='opened')
     logger.debug(f'epics: {epics}')
     for epic in epics:
         if epic.title == epic_title:
@@ -75,18 +75,21 @@ def get_epic(epic_title):
     return None
 
 
-def get_milestone(milestone_title):
-    milestones = gl.projects.get(PROJECT_ID).milestones.list()
+def get_milestone_id(milestone_title):
+    milestones = gl.groups.get(GROUP_ID).milestones.list(state='active', get_all=True)
+    logger.info(f'milestones: {milestones}')
+
     for milestone in milestones:
-        if milestone.title == milestone_title:
-            return gl.groups.get(GROUP_ID).milestones.get(milestone.iid)
+        if milestone.title.strip().lower() == milestone_title.strip().lower():
+            return milestone.get_id()
     logger.error(f'milestone {milestone_title} not found.')
     return None
+
 
 def update_issue(issue, row):
     logger.info(f"Updating issue ID {issue.iid} - {issue.title}")
     issue_updated = False
-    
+
     for key, value in row.items():
         if key in issue.attributes and str(getattr(issue, key, '')).strip() != str(value).strip() and value != "":
             if key == 'author':
@@ -94,12 +97,12 @@ def update_issue(issue, row):
 
             if key == 'epic':
                 # Remove epic from issue if csv value is empty or different
-                if  value == "" or (issue.epic is not None and value != issue.epic["title"]):
+                if value == "" or (issue.epic is not None and value != issue.epic["title"]):
                     logger.info(f"Removing epic {issue.epic['title']}")
                     issue.epic = None
                     issue_updated = True
                     continue
-                
+
                 # Check if epic is already set
                 if issue.epic is not None and value == issue.epic["title"]:
                     continue
@@ -110,7 +113,25 @@ def update_issue(issue, row):
                     epic.issues.create({'issue_id': issue.id})
                     logger.info(f"Added issue to epic {value}")
                 continue
-                
+
+            if key == 'milestone':
+                # Remove milestone from issue if csv value is empty or different
+                if value == "" or (issue.milestone is not None and value != issue.milestone["title"]):
+                    logger.info(f"Removing milestone {issue.milestone['title']}")
+                    issue.milestone = None
+                    issue_updated = True
+                    continue
+
+                # Check if milestone is already set
+                if issue.milestone is not None and value == issue.milestone["title"]:
+                    continue
+
+                # Set milestone
+                milestone_id = get_milestone_id(value)
+                issue.milestone_id = milestone_id
+                issue_updated = True
+                continue
+
             logger.info(f"Updating {key} from {getattr(issue, key, '')} to {value}")
             setattr(issue, key, value)
             issue_updated = True
@@ -134,11 +155,12 @@ def create_issue(row):
             new_issue_data['epic_id'] = epic.id
 
     if row['milestone']:
-        milestone = get_milestone(row['milestone'])
-        if milestone is not None:
-            new_issue_data['milestone_id'] = milestone.id
+        milestone_id = get_milestone_id(row['milestone'])
+        if milestone_id is not None:
+            new_issue_data['milestone_id'] = milestone_id
 
     project = gl.projects.get(PROJECT_ID)
+    logger.info(f"Creating new issue {new_issue_data}") 
     project.issues.create(new_issue_data)
 
 
@@ -164,9 +186,10 @@ def update_issues(input):
             try:
                 issue = project.issues.get(int(issue_id))
                 update_issue(issue, row)
-            except gitlab.exceptions.GitlabGetError:
-                click.echo(f'Issue ID {issue_id} not found.')
-        
+            except gitlab.exceptions.GitlabGetError as e:
+                click.echo(f'Issue ID {issue_id} not found - {e}')
+            except gitlab.exceptions.GitlabUpdateError as e:
+                click.echo(f'Issue ID {issue_id} could not be updated - {e}')       
 
 
 if __name__ == '__main__':
