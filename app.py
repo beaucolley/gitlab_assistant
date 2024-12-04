@@ -244,62 +244,79 @@ def get_milestone_id(gl, group_id, milestone_title):
 
 
 def update_issue(gl, project, issue, row):
-    logger.info(f"Updating issue ID {issue.iid} - {issue.title}")
+    logger.info(f"Processing issue ID {issue.iid} - {issue.title}")
     issue_updated = False
 
-    for key, value in row.items():
-        if key in issue.attributes and str(getattr(issue, key, '')).strip() != str(value).strip() and value != "":
-            if key == 'author':
-                continue
-
-            if key == 'iteration':
-                continue
-
-            if key == 'labels':
-                continue
-
-            if key == 'epic':
-                # Remove epic from issue if csv value is empty or different
-                if value == "" or (issue.epic is not None and value != issue.epic["title"]):
-                    logger.info(f"Removing epic {issue.epic['title']}")
-                    issue.epic = None
-                    issue_updated = True
-                    continue
-
-                # Check if epic is already set
-                if issue.epic is not None and value == issue.epic["title"]:
-                    continue
-
-                # Set epic
-                epic = get_epic(gl, project.namespace['id'], value)
-                if epic is not None:
-                    epic.issues.create({'issue_id': issue.id})
-                    logger.info(f"Added issue to epic {value}")
-                continue
-
-            if key == 'milestone':
-                # Remove milestone from issue if csv value is empty or different
-                if value == "" or (issue.milestone is not None and value != issue.milestone["title"]):
-                    logger.info(f"Removing milestone {issue.milestone['title']}")
-                    issue.milestone = None
-                    issue_updated = True
-                    continue
-
-                # Check if milestone is already set
-                if issue.milestone is not None and value == issue.milestone["title"]:
-                    continue
-
-                # Set milestone
-                milestone_id = get_milestone_id(gl, project.namespace['id'], value)
-                issue.milestone_id = milestone_id
-                issue_updated = True
-                continue
-
-            logger.info(f"Updating {key} from {getattr(issue, key, '')} to {value}")
-            setattr(issue, key, value)
+    def update_field(field, value):
+        nonlocal issue_updated
+        if str(getattr(issue, field, '')).strip() != str(value).strip() and value != "":
+            logger.info(f"Updating {field} from {getattr(issue, field, '')} to {value}")
+            setattr(issue, field, value)
             issue_updated = True
 
+    def handle_epic(value):
+        nonlocal issue_updated
+        if issue.epic is not None and value == issue.epic["title"]:
+            return
+        
+        if issue.epic is not None:
+            logger.info(f"Removing epic {issue.epic['title']}")
+            issue.epic = None
+            issue_updated = True
+
+        if value != "":
+            epic = get_epic(gl, project.namespace['id'], value)
+            if epic is not None:
+                epic.issues.create({'issue_id': issue.id})
+                logger.info(f"Added issue to epic {value}")
+
+    def handle_milestone(value):
+        nonlocal issue_updated
+        # Check if milestone is the same
+        if issue.milestone is not None and value == issue.milestone["title"]:
+            return
+
+        # Remove current milestone
+        if issue.milestone is not None:
+            logger.info(f"Removing milestone {issue.milestone['title']}")
+            issue.milestone = None
+            issue_updated = True
+
+        # If incoming milestone is not empty, add it
+        if value != "":
+            milestone_id = get_milestone_id(gl, project.namespace['id'], value)
+            if milestone_id is not None:
+                issue.milestone_id = milestone_id
+                issue_updated = True
+
+    def handle_labels(value):
+        nonlocal issue_updated
+        # Check if labels are the same
+        incoming_labels = value.split(',')
+        incoming_labels = [label.strip() for label in incoming_labels]
+
+        if set(issue.labels) == set(incoming_labels):
+            return
+
+        # Add incoming labels
+        logger.info(f"Updating labels {issue.labels} to {incoming_labels}")
+        issue.labels = incoming_labels
+        issue_updated = True
+
+    for key, value in row.items():
+        if key == 'author' or key == 'iteration':
+            continue
+        elif key == 'epic':
+            handle_epic(value)
+        elif key == 'milestone':
+            handle_milestone(value)
+        elif key == 'labels':
+            handle_labels(value)
+        else:
+            update_field(key, value)
+
     if issue_updated:
+        logger.info(f"Updating issue {issue.id} - {issue.title}")
         issue.save()
 
 
