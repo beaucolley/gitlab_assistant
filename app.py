@@ -10,6 +10,7 @@ import configparser
 from collections import defaultdict
 import pdb
 import re
+import pandas as pd
 
 # Load configuration from config file
 config = configparser.ConfigParser()
@@ -33,6 +34,27 @@ def load_project_config(project_name):
 def cli():
     """Command line tool for managing GitLab issues."""
     pass
+
+def issues_to_dataframe(issues):
+    """Convert a list of issues to a pandas DataFrame."""
+    # data = []
+    # for issue in issues:
+    #     data.append({
+    #         'id': issue.id,
+    #         'iid': issue.iid,
+    #         'title': issue.title,
+    #         'epic': issue.epic["title"] if issue.epic else '',
+    #         'milestone': issue.milestone["title"] if issue.milestone else '',
+    #         'iteration': issue.iteration['start_date'] if issue.attributes['iteration'] is not None else '',
+    #         'labels': ', '.join(issue.labels),
+    #         'author': issue.author['name'],
+    #         'created_at': issue.created_at,
+    #         'description': issue.description,
+    #         'state': issue.state,
+    #         'weight': issue.weight if 'weight' in issue.attributes else ''
+    #     })
+    return pd.DataFrame(issues)
+
 
 
 @cli.command()
@@ -90,7 +112,7 @@ def pull_issues(project_name, output, all):
     project = gl.projects.get(PROJECT_ID)
 
     # Get all open issues
-    open_issues = project.issues.list(state='opened', get_all=True)
+    open_issues = project.issues.list(get_all=True)
 
     # Prepare data for CSV
     with open(output, mode='w', newline='', encoding='utf-8') as csvfile:
@@ -99,6 +121,7 @@ def pull_issues(project_name, output, all):
         writer.writeheader()
         for issue in open_issues:
             logger.info(f"Processing issue {issue.id} - {issue.title}")
+            print(issue)
             writer.writerow({
                 'id': issue.id,
                 'iid': issue.iid,
@@ -113,6 +136,8 @@ def pull_issues(project_name, output, all):
                 'state': issue.state,
                 'weight': issue.weight if 'weight' in issue.attributes else ''
             })
+
+    print(issues_to_dataframe(open_issues))
 
     click.echo(f'Open issues exported to {output}')
 
