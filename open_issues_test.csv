@@ -1,0 +1,2 @@
+id,iid,title,epic,milestone,iteration,labels,author,created_at,description,state,weight
+373958,1065,Improve coverage on 787 skins,787 Sanding Upgrades,2025 – PI 1,2024-12-02,"STATUS::Blocked, [787 Mobile Toolclean]",Ashkan Amirsadri,2023-08-07T18:45:19.378-07:00,,opened,5

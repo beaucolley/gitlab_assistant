@@ -38,7 +38,50 @@ def cli():
 @cli.command()
 @click.option('--project_name', required=True, help='Name of the project to use.')
 @click.option('--output', default='open_issues.csv', help='Output CSV file for open issues.')
-def pull_issues(project_name, output):
+@click.option('--all', is_flag=True, help='Include closed issues as well.')
+@click.option('--closed', is_flag=True, help="pull only closed issues")
+def pull_issues(project_name, output, all, closed):
+    """Fetch and export all open issues to a CSV file."""
+    GITLAB_URL, PROJECT_ID, GROUP_ID, PRIVATE_TOKEN = load_project_config(project_name)
+    gl = gitlab.Gitlab(GITLAB_URL, private_token=PRIVATE_TOKEN)
+
+    # Get the project
+    project = gl.projects.get(PROJECT_ID)
+
+    # Get open or closed issues
+    if closed:
+        issues = project.issues.list(state='closed', get_all=True)
+    else:
+        issues = project.issues.list(state='opened', get_all=True)
+
+    # Add closed issues if pulling all
+    if all:
+        issues += project.issues.list(state='closed', get_all=True)
+
+    # Prepare data for CSV
+    with open(output, mode='w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['id', 'iid', 'title', 'epic', 'milestone', 'iteration', 'labels', 'author', 'created_at', 'description', 'state', 'weight']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for issue in issues:
+            logger.info(f"Processing issue {issue.id} - {issue.title}")
+            writer.writerow({
+                'id': issue.id,
+                'iid': issue.iid,
+                'title': issue.title,
+                'epic': issue.epic["title"] if issue.epic else '',
+                'milestone': issue.milestone["title"] if issue.milestone else '',
+                'iteration': issue.iteration['start_date'] if issue.attributes['iteration'] is not None else '',
+                'labels': ', '.join(issue.labels),
+                'author': issue.author['name'],
+                'created_at': issue.created_at,
+                'description': issue.description,
+                'state': issue.state,
+                'weight': issue.weight if 'weight' in issue.attributes else ''
+            })
+
+    click.echo(f'Issues exported to {output}')
+def pull_issues(project_name, output, all):
     """Fetch and export all open issues to a CSV file."""
     GITLAB_URL, PROJECT_ID, GROUP_ID, PRIVATE_TOKEN = load_project_config(project_name)
     gl = gitlab.Gitlab(GITLAB_URL, private_token=PRIVATE_TOKEN)
@@ -222,11 +265,25 @@ def get_iteration_id(gl, group_id, start_date):
     pass
 
 
+def normalize_string(s):
+    # Replace different hyphen characters with a standard hyphen
+    s = re.sub(r'[-–—]', '-', s)  # Replace various hyphen characters with a standard hyphen
+    # Remove any other special characters (if needed)
+    s = re.sub(r'[^a-zA-Z0-9\s-]', '', s)  # Keep only alphanumeric characters, spaces, and hyphens
+    return s.strip().lower()  # Convert to lowercase for case-insensitive comparison
+
+
+def cmp_str(str1, str2):
+    normalized_str1 = normalize_string(str1)
+    normalized_str2 = normalize_string(str2)
+    return normalized_str1 == normalized_str2
+
+
 def get_epic(gl, group_id, epic_title):
     epics = gl.groups.get(group_id).epics.list(get_all=True, state='opened')
     logger.debug(f'epics: {epics}')
     for epic in epics:
-        if epic.title.strip().lower() == epic_title.strip().lower():
+        if cmp_str(epic.title, epic_title):
             return gl.groups.get(group_id).epics.get(epic.iid)
     logger.error(f'epic {epic_title} not found.')
     return None
@@ -237,9 +294,9 @@ def get_milestone_id(gl, group_id, milestone_title):
     logger.info(f'milestones: {milestones}')
 
     for milestone in milestones:
-        if milestone.title.strip().lower() == milestone_title.strip().lower():
+        if cmp_str(milestone.title, milestone_title):
             return milestone.get_id()
-    logger.error(f'milestone {milestone_title} not found.')
+    logger.error(f'milestone "{milestone_title}" not found.')
     return None
 
 
